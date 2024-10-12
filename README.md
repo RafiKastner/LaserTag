@@ -1,2 +1,2 @@
-# LaserTag
-Laser tag game with arduino
+# Laser Tag Game
+Settings are at the top of the code
