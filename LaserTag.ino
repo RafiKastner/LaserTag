@@ -44,7 +44,8 @@ gunClass sniper(2, 5000, 1000);
 //Game vars
 int health = maxHealth;
 int ammo = maxAmmo;
-char team;
+int team = 0;
+int gun = 0;
 const long HitHex = 0xFF38C7;
 
 //LCD
@@ -104,6 +105,25 @@ void displayHealth(int health) {
 }
 
 
+//IR crap
+struct result {int team; int gun; int ID;};
+
+auto decodeIrRecv(long recv) -> result {
+  int team = (recv >> 7 * 4) & 0xF;
+  int gun = (recv >> 6 * 4) & 0xF;
+  unsigned long ID = recv & 0xFFFFFF; //Doesnt work with greater than 0xFFF???
+  Serial.println(ID, HEX);
+  return result {team, gun, ID};
+}
+
+int generateIrSend() {
+  long int send = (team << 4);
+  gun = 1;
+  send += gun;
+  send << 5;
+  Serial.println(send, HEX);
+  return send;
+}
 
 
 //Binders
@@ -126,6 +146,7 @@ class binder {
   	bool presses[15];
   public:
     void bindButtonEvent(int buttonPin, String type, void (*callback)()) {
+      pinMode(buttonPin, INPUT);
       funcs[num] = callback;
       types[num] = type;
       pins[num] = buttonPin;
@@ -145,11 +166,12 @@ class binder {
       runEvent(index);
     }
   void run() {
+
+    // ok so working rn but menu breaks with new changes so figure that out
     for (int i = 0; i < num; i++) {
       if (digitalRead(pins[i]) == LOW) {
         presses[i] = false;
       } else if (!presses[i] && digitalRead(pins[i]) == HIGH) {
-        Serial.println("PRESS");
         runEvent(i);
         presses[i] = true;
       } 
@@ -356,6 +378,7 @@ public:
 
   void select() {
     screens[currentScreen]->select();
+    screens[currentScreen]->display();
   }
 
   void nextItem() {
@@ -379,13 +402,13 @@ menuItem<int> items_0[] = {
   menuItem<int>("nil", &ammo, 0, false, false)
 };
 
-menuItem<char> items_1[] = {
-  menuItem<char>("1", &team, "1", true),
-  menuItem<char>("2", &team, "2", true),
-  menuItem<char>("3", &team, "3", true),
-  menuItem<char>("4", &team, "4", true),
-  menuItem<char>("5", &team, "5", true),
-  menuItem<char>("6", &team, "6", true)
+menuItem<int> items_1[] = {
+  menuItem<int>("1", &team, 1, true),
+  menuItem<int>("2", &team, 2, true),
+  menuItem<int>("3", &team, 3, true),
+  menuItem<int>("4", &team, 4, true),
+  menuItem<int>("5", &team, 5, true),
+  menuItem<int>("6", &team, 6, true)
 };
 
 menuItem<bool> items_2[] = {
@@ -394,7 +417,7 @@ menuItem<bool> items_2[] = {
 };
 
 menuScreen<int> screen_0("Health:", items_0, 2, "Ammo:");
-menuScreen<char> screen_1("Nums", items_1, 6);
+menuScreen<int> screen_1("Team", items_1, 6);
 menuScreen<bool> screen_2("Next", items_2, 2);
 
 menuScreenBase* screens[] = { &screen_0, &screen_1, &screen_2 };
@@ -410,7 +433,7 @@ void call() {
 binder bind;
 void setup() {
   Serial.begin(9600);
-  
+
   //Menu screen setup
   lcd.begin(16, 2);
   screen_0.setLocked();
@@ -419,7 +442,7 @@ void setup() {
   display.update();
 
   //Buttons
-  bind.bindButtonEvent(8, "type", call);
+  bind.bindButtonEvent(A2, "type", call);
 
   //IR setup
   irrecv.enableIRIn();
@@ -427,12 +450,15 @@ void setup() {
 
   //Pins
   pinMode(PARRY_PIN, INPUT);
-  pinMode(8, INPUT);
+  pinMode(A2, INPUT);
+
+  generateIrSend();
+  // 13, 12, 11, all analog are available
 }
 
 void loop() {
   milli = millis();
-  bind.run();
+    bind.run();
 
   //Menu
   if (lcd.button() == 0) {
@@ -458,6 +484,7 @@ void loop() {
       case KEYPAD_SELECT:
         lcdPressed = true;
         display.select();
+        generateIrSend();
         break;
     }
   }
