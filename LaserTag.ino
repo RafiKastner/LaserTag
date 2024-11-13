@@ -31,21 +31,22 @@ public:
   int damage = 1;
   int reloadTime = 3000;
   int shootDebounce = 300;
+  int ID = 1;
   //sound
 
-  gunClass(int damage, int reloadTime, int shootDebounce)
-    : damage(damage), reloadTime(reloadTime), shootDebounce(shootDebounce) {}
+  gunClass(int damage, int reloadTime, int shootDebounce, int ID)
+    : damage(damage), reloadTime(reloadTime), shootDebounce(shootDebounce), ID(ID) {}
   gunClass() = default;
 };
 
 gunClass rifle;
-gunClass sniper(2, 5000, 1000);
+gunClass sniper(2, 5000, 1000, 2);
 
 //Game vars
 int health = maxHealth;
 int ammo = maxAmmo;
-int team = 0;
-int gun = 0;
+int team = 1;
+gunClass gun = rifle;
 const long HitHex = 0xFF38C7;
 
 //LCD
@@ -104,25 +105,32 @@ void displayHealth(int health) {
   lcd.print(health);
 }
 
+//Button functions
+void shoot() {
+  
+}
+
 
 //IR crap
+long int generateIrSend() {
+  long int send = (team << 4);
+  send += gun.ID;
+  send <<= (6 * 4);
+  send += random(0xFFFFFF);
+  Serial.println(send, HEX);
+  return send;
+}
+
 struct result {int team; int gun; int ID;};
 
 auto decodeIrRecv(long recv) -> result {
-  int team = (recv >> 7 * 4) & 0xF;
-  int gun = (recv >> 6 * 4) & 0xF;
-  unsigned long ID = recv & 0xFFFFFF; //Doesnt work with greater than 0xFFF???
+  int team = (recv >> (7 * 4)) & 0xF;
+  int gun = (recv >> (6 * 4)) & 0xF;
+  long ID = recv & 0xFFFFFF;
+  Serial.println(team);
+  Serial.println(gun);
   Serial.println(ID, HEX);
   return result {team, gun, ID};
-}
-
-int generateIrSend() {
-  long int send = (team << 4);
-  gun = 1;
-  send += gun;
-  send << 5;
-  Serial.println(send, HEX);
-  return send;
 }
 
 
@@ -403,7 +411,7 @@ menuItem<int> items_0[] = {
 };
 
 menuItem<int> items_1[] = {
-  menuItem<int>("1", &team, 1, true),
+  menuItem<int>("1", &team, 1, true, true),
   menuItem<int>("2", &team, 2, true),
   menuItem<int>("3", &team, 3, true),
   menuItem<int>("4", &team, 4, true),
@@ -422,12 +430,6 @@ menuScreen<bool> screen_2("Next", items_2, 2);
 
 menuScreenBase* screens[] = { &screen_0, &screen_1, &screen_2 };
 displayType display(screens, 3);
-
-
-void call() {
-  Serial.println("call");
-}
-
 
 //MAIN
 binder bind;
@@ -451,8 +453,6 @@ void setup() {
   //Pins
   pinMode(PARRY_PIN, INPUT);
   pinMode(A2, INPUT);
-
-  generateIrSend();
   // 13, 12, 11, all analog are available
 }
 
