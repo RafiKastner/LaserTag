@@ -5,7 +5,6 @@
 
 #define DECODE_NEC
 #define MAX_ITEM_COUNT 14
-#define TONE_PIN 2
 
 //leonardo might not have pin 0
 
@@ -20,27 +19,34 @@ const int parryCooldown = 1000;
 const int shootDebounce = 100;
 
 //Pins
-const int RECV_PIN = A5;
-const int PARRY_PIN = A3;
-const int TRIGGER_PIN = A4;
-const int BUZZER_PIN= A1;
+const int RECV_PIN = A3;
+const int SEND_PIN = A2;
+#define TONE_PIN A1;
+const int PARRY_PIN = 13;
+const int TRIGGER_PIN = 12;
+const int RELOAD_PIN = 11;
 
 //Gun settings
+int gunCounter = 0;
+
 class gunClass {
 public:
   int damage = 1;
   int reloadTime = 3000;
   int shootDebounce = 300;
-  int ID = 1;
+  int ID;
   //sound
 
-  gunClass(int damage, int reloadTime, int shootDebounce, int ID)
-    : damage(damage), reloadTime(reloadTime), shootDebounce(shootDebounce), ID(ID) {}
+  gunClass(int damage, int reloadTime, int shootDebounce)
+    : damage(damage), reloadTime(reloadTime), shootDebounce(shootDebounce) {
+      gunCounter += 1;
+      ID = gunCounter;
+    }
   gunClass() = default;
 };
 
 gunClass rifle;
-gunClass sniper(2, 5000, 1000, 2);
+gunClass sniper(2, 5000, 1000);
 
 //Game vars
 int health = maxHealth;
@@ -55,6 +61,7 @@ bool lcdPressed = false;
 
 //IR
 IRrecv irrecv(RECV_PIN);
+IRsend irsend;
 decode_results results;
 
 
@@ -62,19 +69,19 @@ decode_results results;
 int hitTimer = 0;
 int parryTimer = 0;
 int shootTimer = 0;
+int reloadTimer = 0;
 
 //States
 bool isBeingHit = false;
 bool isParrying = false;
 bool isDead = false;
+bool isReloading = false;
 
 //Checks
 bool canParry = true;
 
 //Misc
 int milli = 0;
-gunClass currentGun = rifle;
-
 
 
 
@@ -97,19 +104,83 @@ void killScreen() {
   lcd.print("YOU DIED");
 }
 
-void displayHealth(int health) {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Health:");
-  lcd.setCursor(7, 0);
-  lcd.print(health);
-}
-
 //Button functions
 void shoot() {
-  
+  int send = generateIrSend();
+  irsend.sendNEC(send, 32);
+  Serial.print("Fire: ");
+  Serial.print(send);
+  Serial.println();
 }
 
+void reload() {
+  isReloading = true;
+  reloadTimer = milli;
+}
+
+const int reloadLength = 200;
+const int reloadStages = 16;
+int pastStage = 0;
+bool endReload = false;
+byte reloadSymbolStart[] = {
+  B00111,
+  B01111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B01111,
+  B00111,
+};
+byte reloadSymbolEnd[] = {
+  B11100,
+  B11110,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11110,
+  B11100,
+};
+byte full[] = {
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+};
+byte bullet[] = {
+  B00100,
+  B01110,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B00000,
+  B11111,
+};
+void reloadAnim() {
+  int stage = (milli - reloadTimer) / reloadLength;
+  if (stage == pastStage) { return; }
+  if (stage > reloadStages) {
+    isReloading = false;
+    pastStage = 0;
+    endReload = true;
+    return;
+  }
+  pastStage = stage;
+  lcd.clear();
+  lcd.print("Health: ");
+  lcd.print(health);
+  lcd.setCursor(0, 2);
+  for (int i = 0; i < stage; i++) {
+    lcd.write(4);
+  }
+  Serial.println(stage);
+}
 
 //IR crap
 long int generateIrSend() {
@@ -132,7 +203,6 @@ auto decodeIrRecv(long recv) -> result {
   Serial.println(ID, HEX);
   return result {team, gun, ID};
 }
-
 
 //Binders
 class button {
@@ -362,6 +432,7 @@ private:
 public:
   menuScreenBase** screens;
   int currentScreen = 0;
+  bool locked = false;
 
   displayType(menuScreenBase** screens, size_t size)
     : screens(screens), size(size){};
@@ -370,6 +441,7 @@ public:
     screens[currentScreen]->display();
   }
   void next() {
+    if (locked) { return; }
     currentScreen += 1;
     if (currentScreen >= size) {
       currentScreen = 0;
@@ -377,6 +449,7 @@ public:
     update();
   }
   void previous() {
+    if (locked) { return; }
     currentScreen -= 1;
     if (currentScreen < 0) {
       currentScreen = size - 1;
@@ -385,25 +458,25 @@ public:
   }
 
   void select() {
+    if (locked) { return; }
     screens[currentScreen]->select();
     screens[currentScreen]->display();
   }
 
   void nextItem() {
+    if (locked) { return; }
     screens[currentScreen]->nextItem();
   }
 
   void previousItem() {
+    if (locked) { return; }
     screens[currentScreen]->previousItem();
   }
 };
 
 
-
 //MENU ITEMS
-int someint = 0;
 bool somebool = false;
-
 
 menuItem<int> items_0[] = {
   menuItem<int>("nil", &health, 0, false, false),
@@ -436,15 +509,22 @@ binder bind;
 void setup() {
   Serial.begin(9600);
 
+
   //Menu screen setup
   lcd.begin(16, 2);
   screen_0.setLocked();
   screen_0.setDisplayLast();
-  screen_1.setDisplayLast();
   display.update();
 
+  //LCD symbols
+  lcd.createChar(1, reloadSymbolStart);
+  lcd.createChar(2, reloadSymbolEnd);
+  lcd.createChar(3, full);
+  lcd.createChar(4, bullet);
+
   //Buttons
-  bind.bindButtonEvent(A2, "type", call);
+  bind.bindButtonEvent(11, "Hold", shoot);
+  bind.bindButtonEvent(12, "Press", reload);
 
   //IR setup
   irrecv.enableIRIn();
@@ -458,15 +538,19 @@ void setup() {
 
 void loop() {
   milli = millis();
-    bind.run();
-
+  bind.run();
+  
   //Menu
   if (lcd.button() == 0) {
     lcdPressed = false;
   } else if (!lcdPressed) {
     switch (lcd.button()) {
       case KEYPAD_LEFT:
-        display.next();
+        if (!isReloading) {
+          display.locked = true;
+          reload();
+        }
+        //display.next();
         lcdPressed = true;
         break;
       case KEYPAD_RIGHT:
@@ -484,9 +568,22 @@ void loop() {
       case KEYPAD_SELECT:
         lcdPressed = true;
         display.select();
-        generateIrSend();
+        if (display.locked) {
+          display.locked = false;
+          display.update();
+        }
         break;
     }
+  }
+
+  //Reload animation
+  if (isReloading) {
+    reloadAnim();
+  }
+  if (endReload) {
+    endReload = false;
+    display.locked = false;
+    display.update();
   }
 
   //IR Receive
@@ -514,6 +611,7 @@ void loop() {
     //parryTimer = milli to reset cd and punish for not parrying?
     if (health <= 0) {
       isDead = true;
+      display.locked = true;
       killScreen();
       return;
     }
